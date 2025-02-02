@@ -5,18 +5,16 @@
 #define ACCEL_XOUT_H     0x3B
 
 // Configuration
-const float DEADZONE = 0.2;           // 20% tilt required to start moving
-const float MAX_TILT = 45.0;          // Maximum tilt angle (degrees)
-const int BASE_SPEED = 20;             // Base movement speed (pixels per update)
-const int UPDATE_INTERVAL = 20;       // Milliseconds between movements
+const float DEADZONE = 25.0;          // Degrees where no movement occurs
+const float MAX_TILT = 30.0;         // Maximum effective tilt angle
+const int MOUSE_SCALE =1;           // Pixels per degree of tilt
+const float FILTER_COEFF = 0.3;      // Smoothing factor (0.1-0.3)
 
 // Calibration offsets
 float ax_offset = 0, ay_offset = 0, az_offset = 0;
 
-// State tracking
-float currentSpeedX = 0;
-float currentSpeedY = 0;
-unsigned long lastUpdate = 0;
+// Filtered values
+float smooth_pitch = 0, smooth_roll = 0;
 
 void setup() {
   Serial.begin(115200);
@@ -34,42 +32,47 @@ void setup() {
 }
 
 void loop() {
-  if (millis() - lastUpdate < UPDATE_INTERVAL) return;
-  lastUpdate = millis();
-
-  // Read accelerometer
+  // Read raw accelerometer data
   int16_t ax, ay, az;
   readAccel(ax, ay, az);
 
-  // Convert to real-world units
-  float ax_g = (ax - ax_offset) / 16384.0;
-  float ay_g = (ay - ay_offset) / 16384.0;
-  float az_g = (az - az_offset) / 16384.0;
+  // Apply calibration
+  float ax_cal = ax - ax_offset;
+  float ay_cal = ay - ay_offset;
+  float az_cal = az - az_offset;
+
+  // Convert to gravity units (1g = 16384 LSB)
+  float ax_g = ax_cal / 16384.0;
+  float ay_g = ay_cal / 16384.0;
+  float az_g = az_cal / 16384.0;
 
   // Calculate tilt angles
-  float pitch = atan2(-ax_g, sqrt(ay_g * ay_g + az_g * az_g)) * 180/PI;
+  float pitch = atan2(-ax_g, sqrt(ay_g*ay_g + az_g*az_g)) * 180/PI;
   float roll = atan2(ay_g, az_g) * 180/PI;
 
-  // Calculate movement vectors
-  float targetX = constrain(roll / MAX_TILT, -1, 1);
-  float targetY = constrain(pitch / MAX_TILT, -1, 1);
+  // Apply smoothing
+  smooth_pitch = smooth_pitch * (1-FILTER_COEFF) + pitch * FILTER_COEFF;
+  smooth_roll = smooth_roll * (1-FILTER_COEFF) + roll * FILTER_COEFF;
 
-  // Apply deadzone
-  if (abs(targetX) < DEADZONE) targetX = 0;
-  if (abs(targetY) < DEADZONE) targetY = 0;
+  // Calculate mouse movement
+  int moveX = 0, moveY = 0;
+  
+  // X-axis (left/right tilt)
+  if(abs(smooth_roll) > DEADZONE) {
+    moveX = constrain((smooth_roll - copysign(DEADZONE, smooth_roll)) * MOUSE_SCALE, -127, 127);
+  }
 
-  // Smooth acceleration/deceleration
-  currentSpeedX = lerp(currentSpeedX, targetX, 0.2);
-  currentSpeedY = lerp(currentSpeedY, targetY, 0.2);
+  // Y-axis (forward/backward tilt)
+  if(abs(smooth_pitch) > DEADZONE) {
+    moveY = constrain((smooth_pitch - copysign(DEADZONE, smooth_pitch)) * MOUSE_SCALE, -127, 127);
+  }
 
-  // Calculate movement
-  int moveX = round(currentSpeedX * BASE_SPEED);
-  int moveY = round(currentSpeedY * BASE_SPEED);
-
-  // Apply mouse movement
-  if (moveX != 0 || moveY != 0) {
+  // Send mouse movement
+  if(moveX != 0 || moveY != 0) {
     Mouse.move(moveX, moveY);
   }
+
+  delay(10);
 }
 
 void readAccel(int16_t &ax, int16_t &ay, int16_t &az) {
@@ -87,9 +90,9 @@ void calibrateMPU() {
   delay(2000);
 
   const int samples = 500;
-  float axSum = 0, aySum = 0, azSum = 0;
+  long axSum = 0, aySum = 0, azSum = 0;
 
-  for (int i = 0; i < samples; i++) {
+  for(int i=0; i<samples; i++) {
     int16_t ax, ay, az;
     readAccel(ax, ay, az);
     axSum += ax;
@@ -100,9 +103,7 @@ void calibrateMPU() {
 
   ax_offset = axSum / samples;
   ay_offset = aySum / samples;
-  az_offset = azSum / samples - 16384.0; // Account for 1G
-}
+  az_offset = (azSum / samples) - 16384; // Account for 1G Z-axis
 
-float lerp(float a, float b, float t) {
-  return a + t * (b - a);
+  Serial.println("Calibration complete");
 }
