@@ -5,10 +5,10 @@
 #define ACCEL_XOUT_H     0x3B
 
 // Configuration
-const float DEADZONE = 25.0;          // Degrees where no movement occurs
-const float MAX_TILT = 30.0;         // Maximum effective tilt angle
-const int MOUSE_SCALE =1;           // Pixels per degree of tilt
-const float FILTER_COEFF = 0.3;      // Smoothing factor (0.1-0.3)
+const float DEADZONE = 10.0;        // Degrees where no movement occurs
+const float MAX_TILT = 30.0;        // Maximum effective tilt angle
+const int MOUSE_SCALE = 3;          // Pixels per degree of tilt
+const float FILTER_COEFF = 0.2;     // Smoothing factor (0.1-0.3)
 
 // Calibration offsets
 float ax_offset = 0, ay_offset = 0, az_offset = 0;
@@ -47,28 +47,28 @@ void loop() {
   float az_g = az_cal / 16384.0;
 
   // Calculate tilt angles
-  float pitch = atan2(-ax_g, sqrt(ay_g*ay_g + az_g*az_g)) * 180/PI;
-  float roll = atan2(ay_g, az_g) * 180/PI;
+  float pitch = atan2(-ax_g, sqrt(ay_g * ay_g + az_g * az_g)) * 180 / PI;
+  float roll = atan2(ay_g, az_g) * 180 / PI;
 
   // Apply smoothing
-  smooth_pitch = smooth_pitch * (1-FILTER_COEFF) + pitch * FILTER_COEFF;
-  smooth_roll = smooth_roll * (1-FILTER_COEFF) + roll * FILTER_COEFF;
+  smooth_pitch = smooth_pitch * (1 - FILTER_COEFF) + pitch * FILTER_COEFF;
+  smooth_roll = smooth_roll * (1 - FILTER_COEFF) + roll * FILTER_COEFF;
 
   // Calculate mouse movement
   int moveX = 0, moveY = 0;
-  
-  // X-axis (left/right tilt)
-  if(abs(smooth_roll) > DEADZONE) {
-    moveX = constrain((smooth_roll - copysign(DEADZONE, smooth_roll)) * MOUSE_SCALE, -127, 127);
-  }
 
-  // Y-axis (forward/backward tilt)
-  if(abs(smooth_pitch) > DEADZONE) {
+  // Move Forward/Backward using pitch
+  if (abs(smooth_pitch) > DEADZONE) {
     moveY = constrain((smooth_pitch - copysign(DEADZONE, smooth_pitch)) * MOUSE_SCALE, -127, 127);
   }
 
+  // Move Left/Right using Y-axis tilt (ay_g), NOT roll
+  if (abs(ay_g) > 0.1) {  // Small threshold to prevent drift
+    moveX = constrain(ay_g * MOUSE_SCALE * 20, -127, 127);  // Scale factor for sensitivity
+  }
+
   // Send mouse movement
-  if(moveX != 0 || moveY != 0) {
+  if (moveX != 0 || moveY != 0) {
     Mouse.move(moveX, moveY);
   }
 
@@ -92,7 +92,7 @@ void calibrateMPU() {
   const int samples = 500;
   long axSum = 0, aySum = 0, azSum = 0;
 
-  for(int i=0; i<samples; i++) {
+  for (int i = 0; i < samples; i++) {
     int16_t ax, ay, az;
     readAccel(ax, ay, az);
     axSum += ax;
