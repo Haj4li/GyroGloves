@@ -1,2 +1,2 @@
-# ControlGloves
+# GyroGloves
  
